@@ -72,11 +72,24 @@
             flex-direction: column;
         }
 
-        #retry-message button {
+        #retry-message button,
+        #trigger-button {
             padding: 10px 20px;
             font-size: 18px;
             margin-top: 20px;
             cursor: pointer;
+        }
+
+        #trigger-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 15;
+            background-color: rgba(255, 69, 0, 0.8);
+            color: white;
+            border: none;
+            border-radius: 5px;
         }
     </style>
 </head>
@@ -88,17 +101,18 @@
     </div>
 
     <video id="video" autoplay playsinline></video>
-
     <canvas id="canvas"></canvas>
-
     <img id="gif" src="volcane.gif" alt="Volcano GIF">
-
     <audio id="audio" src="earthquake.mp3"></audio>
 
+    <!-- Retry Message -->
     <div id="retry-message">
         Vuoi riprovare?
         <button onclick="restartDetection()">Riprova</button>
     </div>
+
+    <!-- Trigger Button to show GIF -->
+    <button id="trigger-button" onclick="showGifAndPlayAudio()">Mostra Eruzione</button>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.7.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -140,7 +154,6 @@
 
         let mobilenetModel;
         let cocoSsdModel;
-
         async function loadModels() {
             mobilenetModel = await mobilenet.load();
             cocoSsdModel = await cocoSsd.load();
@@ -151,12 +164,11 @@
         const mountainKeywords = ['volcano'];
 
         function showGifAndPlayAudio() {
-            if (!gifVisible && gifPlayCount < 2) {
+            if (!gifVisible && gifPlayCount < 100) {
                 gifVisible = true;
                 gif.style.display = 'block';
-                // Resetta la GIF riapplicando il src
                 gif.src = 'volcane.gif?' + new Date().getTime();
-                audio.currentTime = 0; // Resetta l'audio
+                audio.currentTime = 0;
                 audio.play();
                 gifPlayCount++;
 
@@ -164,9 +176,6 @@
                     gif.style.display = 'none';
                     gifVisible = false;
 
-                    if (gifPlayCount >= 3) {
-                        stopDetection();
-                    }
                 }, 3000);
             }
         }
