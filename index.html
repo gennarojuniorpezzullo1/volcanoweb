@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mountain Detection with Object Bounding Box</title>
+    <title>Rilevamento del Vulcano</title>
     <style>
-        body, html {
+        body,
+        html {
             margin: 0;
             padding: 0;
             height: 100%;
@@ -13,7 +15,9 @@
             overflow: hidden;
             font-family: Arial, sans-serif;
         }
-        video, canvas {
+
+        video,
+        canvas {
             width: 100%;
             height: 100%;
             object-fit: cover;
@@ -21,6 +25,7 @@
             top: 0;
             left: 0;
         }
+
         #gif {
             position: absolute;
             display: none;
@@ -31,14 +36,7 @@
             left: 0;
             z-index: 10;
         }
-        #predictions {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            font-size: 16px;
-            color: blue;
-            z-index: 1;
-        }
+
         #info {
             position: absolute;
             width: 100%;
@@ -49,13 +47,40 @@
             font-size: 18px;
             z-index: 2;
         }
+
         #light-warning {
             font-size: 14px;
             color: #666;
             margin-top: 5px;
         }
+
+        #retry-message {
+            display: none;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            text-align: center;
+            font-size: 24px;
+            z-index: 15;
+            top: 0;
+            left: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        #retry-message button {
+            padding: 10px 20px;
+            font-size: 18px;
+            margin-top: 20px;
+            cursor: pointer;
+        }
     </style>
 </head>
+
 <body>
     <div id="info">
         Inquadra il vulcano
@@ -70,7 +95,10 @@
 
     <audio id="audio" src="earthquake.mp3"></audio>
 
-    <div id="predictions"></div>
+    <div id="retry-message">
+        Vuoi riprovare?
+        <button onclick="restartDetection()">Riprova</button>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.7.0"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -79,24 +107,29 @@
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const context = canvas.getContext('2d');
-        const predictionsDiv = document.getElementById('predictions');
         const gif = document.getElementById('gif');
         const audio = document.getElementById('audio');
+        const retryMessage = document.getElementById('retry-message');
 
         let gifVisible = false;
-        let hasPlayedOnce = false; // Variabile per tracciare se la GIF è stata mostrata una volta
+        let gifPlayCount = 0;
+        let detectionRunning = true;
+        let modelsLoaded = false;
 
         async function setupCamera() {
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 const constraints = {
                     video: {
-                        facingMode: { ideal: "environment" } // Imposta la fotocamera posteriore
+                        facingMode: { ideal: "environment" }
                     }
                 };
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
                 return new Promise((resolve) => {
                     video.onloadedmetadata = () => {
+                        // Imposta le dimensioni del canvas in base al video
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
                         resolve(video);
                     };
                 });
@@ -107,31 +140,46 @@
 
         let mobilenetModel;
         let cocoSsdModel;
+
         async function loadModels() {
             mobilenetModel = await mobilenet.load();
             cocoSsdModel = await cocoSsd.load();
+            modelsLoaded = true;
             console.log("Modelli caricati!");
         }
 
         const mountainKeywords = ['volcano'];
 
         function showGifAndPlayAudio() {
-            if (!gifVisible && !hasPlayedOnce) {
+            if (!gifVisible && gifPlayCount < 2) {
                 gifVisible = true;
-                gif.style.display = 'block';  // Mostra la GIF
+                gif.style.display = 'block';
+                // Resetta la GIF riapplicando il src
+                gif.src = 'volcane.gif?' + new Date().getTime();
+                audio.currentTime = 0; // Resetta l'audio
                 audio.play();
+                gifPlayCount++;
+
                 setTimeout(() => {
-                    gif.style.display = 'none';  // Nascondi la GIF dopo la prima volta
+                    gif.style.display = 'none';
                     gifVisible = false;
-                    hasPlayedOnce = true; // Impedisce che venga mostrata nuovamente
-                }, 3000); // Mostra la GIF per 3 secondi (adatta in base alla durata desiderata)
+
+                    if (gifPlayCount >= 3) {
+                        stopDetection();
+                    }
+                }, 3000);
             }
         }
 
         async function detectFrame() {
+            if (!detectionRunning || !modelsLoaded) return;
+
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const mobilenetPredictions = await mobilenetModel.classify(canvas);
-            const cocoSsdPredictions = await cocoSsdModel.detect(canvas);
+
+            const [mobilenetPredictions, cocoSsdPredictions] = await Promise.all([
+                mobilenetModel.classify(canvas),
+                cocoSsdModel.detect(canvas)
+            ]);
 
             const mountainDetected = mobilenetPredictions.some(prediction => {
                 return mountainKeywords.some(keyword => prediction.className.toLowerCase().includes(keyword));
@@ -141,29 +189,44 @@
                 showGifAndPlayAudio();
             }
 
-            predictionsDiv.innerHTML = mobilenetPredictions.map(prediction => 
-                `${prediction.className}: ${(prediction.probability * 100).toFixed(2)}%`
-            ).join('<br>');
-
             context.clearRect(0, 0, canvas.width, canvas.height);
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
             cocoSsdPredictions.forEach(prediction => {
                 if (mountainKeywords.some(keyword => prediction.class.toLowerCase().includes(keyword))) {
                     context.beginPath();
                     context.rect(...prediction.bbox);
                     context.lineWidth = 2;
                     context.strokeStyle = 'red';
-                    context.fillStyle = 'red';
                     context.stroke();
+                    context.font = '16px Arial';
+                    context.fillStyle = 'red';
                     context.fillText(
                         `${prediction.class}: ${(prediction.score * 100).toFixed(2)}%`,
                         prediction.bbox[0],
-                        prediction.bbox[1] > 10 ? prediction.bbox[1] - 5 : 10
+                        prediction.bbox[1] > 20 ? prediction.bbox[1] - 5 : 20
                     );
                 }
             });
 
             requestAnimationFrame(detectFrame);
+        }
+
+        function stopDetection() {
+            video.style.display = 'none';
+            canvas.style.display = 'none';
+            retryMessage.style.display = 'flex';
+            detectionRunning = false;
+        }
+
+        function restartDetection() {
+            gifPlayCount = 0;
+            detectionRunning = true;
+            retryMessage.style.display = 'none';
+            video.style.display = 'block';
+            canvas.style.display = 'block';
+            gifVisible = false;
+            detectFrame();
         }
 
         async function init() {
@@ -175,4 +238,5 @@
         init();
     </script>
 </body>
+
 </html>
